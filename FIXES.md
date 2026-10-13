@@ -1,6 +1,6 @@
 # Correctness and validation fixes
 
-Branch `fix/correctness-validation`, three commits on top of `f1c2b7e` (pytorch branch, Aug 2023).
+Five commits on top of the upstream `pytorch` branch of vinash85/deepImmune (last upstream commit `f1c2b7e`, Aug 2023): code fixes and tests, leave-one-study-out preprocessing, the survival script, optional plotting imports, and repository housekeeping.
 
 ## 1. deepImmune code fixes (`model/net.py`, `model/data_generator.py`, `utils.py`, `train.py`, `evaluate.py`)
 
@@ -45,7 +45,7 @@ Replaces `deepImmune_coxregr.sh`: factors selected on one split and tested on an
 ## Running
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch          # Linux without a GPU: add --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements-test.txt
 pytest -q tests
 

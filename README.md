@@ -1,148 +1,120 @@
-# deepImmune — multi-task cross-cohort benchmark fork
+# GeneExpression-ImmuneFeatures
 
-This fork of [vinash85/deepImmune](https://github.com/vinash85/deepImmune) (pytorch branch, Sahu, Flaherty and Liu) is used, with Avinash Sahu's permission, to test whether training on immune phenotypes and survival improves prediction of immunotherapy response in cohorts the model has not seen. It keeps the original GPL-3.0 licence.
+Does training a model on immune phenotypes and survival, alongside immunotherapy response, help it predict response in patient cohorts it has never seen?
 
-Changes from upstream are listed in [FIXES.md](FIXES.md): correctness fixes, seeded runs, a pytest suite, leakage-free leave-one-study-out preprocessing (`data_processing/preprocess_loco.R`), a split checker and a stratified survival script.
+This repository tests that question with **deepImmune**, a multi-task deep learning model by Avinash Sahu, Keith Flaherty and X. Shirley Liu. It is a copy of the `pytorch` branch of [vinash85/deepImmune](https://github.com/vinash85/deepImmune), used and modified with Avinash Sahu's permission.
 
-### Quick start
+Maintainer: Olufunmilola Oyebamiji
+
+## Status
+
+| Part | State |
+|---|---|
+| Bug fixes to deepImmune, with tests (23 passing) | Done |
+| Leakage-free leave-one-study-out preprocessing (`data_processing/preprocess_loco.R`) | Written; first run on real data pending |
+| Split leakage checker (`scripts/check_splits.py`) | Done |
+| Stratified survival analysis (`scripts/survival_analysis.py`) | Written; tested on simulated data |
+| Per-fold training configs and run script | Not yet written |
+| Baselines and main experiment | Not yet started |
+
+## What changed from upstream
+
+See [FIXES.md](FIXES.md). In short:
+
+- L1/L2 regularization now applies (it never did before).
+- Survival times are rank-normalized within cancer type, as intended.
+- Binary labels must be 0/1; 1/2 coding now raises an error.
+- Runs are reproducible with `--seed`.
+- Config values are parsed safely instead of with `eval()`.
+- Broken dead code is removed.
+- A pytest suite runs on every push.
+
+Old results from upstream code will not reproduce exactly with these fixes.
+
+## Setup
 
 ```bash
-conda create -n deepimmune python=3.11 -y && conda activate deepimmune
-pip install torch                       # Linux CPU-only: add --index-url https://download.pytorch.org/whl/cpu
+conda create -n deepimmune python=3.11 -y
+conda activate deepimmune
+pip install torch                 # Linux without a GPU: add --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements-test.txt
-pytest -q tests
+pytest -q tests                   # expect 23 passed
+```
 
-Rscript data_processing/preprocess_loco.R          # set cfg$data_dir / cfg$out_dir first
+The preprocessing step also needs R with `data.table`, `readxl` and `biomaRt`:
+
+```bash
+Rscript -e 'install.packages(c("data.table","readxl"), repos="https://cloud.r-project.org"); install.packages("BiocManager", repos="https://cloud.r-project.org"); BiocManager::install("biomaRt", ask=FALSE)'
+```
+
+## Data
+
+No data is stored in this repository. `preprocess_loco.R` expects one folder holding per-dataset files, found by folder name at any depth:
+
+```
+<data_dir>/
+  bulkrna_ICB/expression/<dataset>       genes x samples; first column EntrezID, Ensembl_id or gene symbol
+  bulkrna_ICB/follow_up/<dataset>        clinical table; same file name as the expression file
+  bulkrna_NonICB/expression/TCGA-<type>
+  bulkrna_NonICB/follow_up/TCGA-<type>
+  DatafileS1.xlsx ... DatafileS4.xlsx    TCGA immune features (optional multi-task targets)
+```
+
+Dataset names follow `<Study><Year>_<Drug>_<Cancer>_<Platform>[_Pre|_Post]`, for example `Riaz2017_PD1_Melanoma_RNASeq_Ipi.Naive_Pre`.
+
+By default the script:
+
+- uses pre-treatment samples from ICB cohorts as test folds, one study at a time;
+- uses TCGA as extra training data;
+- excludes NanoString and gene-panel cohorts.
+
+All of these can be changed in the `cfg` block at the top of the script.
+
+## Running
+
+1. Edit `cfg` at the top of `data_processing/preprocess_loco.R`. Set `data_dir`, `out_dir` and `annotation_rds` as full paths.
+2. Run:
+
+```bash
+Rscript data_processing/preprocess_loco.R 2>&1 | tee preprocess_log.txt
 python scripts/check_splits.py <out_dir>/folds
 ```
 
-Data are not stored in this repository.
+Outputs in `<out_dir>`:
 
----
+- `folds/<study>/dataset_train.txt`: training cohorts.
+- `folds/<study>/dataset_val.txt`: a seeded 15% patient-level split of the training cohorts, used for tuning.
+- `folds/<study>/dataset_test.txt`: the held-out study only.
+- `folds/<study>/column_index.tsv`: column name → deepImmune index, for writing `params.json`.
+- `table1_cohorts.tsv`: patients and responders per cohort.
+- `fold_summary.tsv`: genes, train, validation and test sizes per fold.
 
-## Original README
-
-# AI-predictor of immunotherapy response. 
-
-*Authors: Avinash Das Sahu, Keith Flaherty and X. Shiley Liu 
-
-## Description 
-
-DeepImmune is an AI predictor that employs drug-induced transcriptomic changes to identify drugs that synergize with immune check blockade (ICB) and prioritize them for clinical trials.
-The parameters of DeepImmune are trained on 40,000 patients tumors. It uses transfer learning to predict response to ICB. Then it implement a pertubation model to estimate effect of drugs on ICB response. 
-
-Note: all scripts must be run in folder `pytorch/vision`.
-
-## Requirements
-
-We recommend using python3 and a virtual env. 
-
-```
-virtualenv -p python3 .env
-source .env/bin/activate
-pip install -r requirements.txt
-```
-
-When you're done working on the project, deactivate the virtual environment with `deactivate`.
-
-## Task
-
-Given the immunotherapy and non-immunotherapy training data predict immunotherapy response using transfer learning.  
-
-## Download the SIGNS dataset
-
-For the vision example, we will used the SIGNS dataset created for this class. The dataset is hosted on google drive, download it [here][SIGNS].
-
-This will download the SIGNS dataset (~1.1 GB) containing photos of hands signs making numbers between 0 and 5.
-Here is the structure of the data:
-```
-SIGNS/
-    train_signs/
-        0_IMG_5864.jpg
-        ...
-    test_signs/
-        0_IMG_5942.jpg
-        ...
-```
-
-The images are named following `{label}_IMG_{id}.jpg` where the label is in `[0, 5]`.
-The training set contains 1,080 images and the test set contains 120 images.
-
-Once the download is complete, move the dataset into `data/SIGNS`.
-Run the script `build_dataset.py` which will resize the images to size `(64, 64)`. The new resized dataset will be located by default in `data/64x64_SIGNS`:
+Training and evaluation use the upstream scripts, now with `--seed`:
 
 ```bash
-python build_dataset.py --data_dir data/SIGNS --output_dir data/64x64_SIGNS
+python train.py    --seed 230 --data_dir <datasets_list.txt> --model_dir <dir with params.json>
+python evaluate.py --seed 230 --data_dir <datasets_list.txt> --model_dir <dir> --restore_file <best.pth.tar>
 ```
 
+Survival associations of predicted immune factors are computed with `scripts/survival_analysis.py`. Run `python scripts/survival_analysis.py --help` for its options.
 
+## Repository layout
 
-## Quickstart (~10 min)
+The files used by this project:
 
-1. __Build the dataset of size 64x64__: make sure you complete this step before training
-```bash
-python build_dataset.py --data_dir data/SIGNS --output_dir data/64x64_SIGNS
-```
+| Path | Purpose |
+|---|---|
+| `train.py`, `evaluate.py`, `utils.py`, `r2python.py` | Training and evaluation |
+| `model/net.py`, `model/data_generator.py` | Model, losses, metrics, data loading |
+| `config_files/` | Example `params.json` and dataset lists |
+| `data_processing/preprocess_loco.R` | Leakage-free input files |
+| `scripts/check_splits.py`, `scripts/survival_analysis.py` | Split checks, survival analysis |
+| `tests/` | pytest suite |
 
-2. __Your first experiment__ We created a `base_model` directory for you under the `experiments` directory. It contains a file `params.json` which sets the hyperparameters for the experiment. It looks like
-```json
-{
-    "learning_rate": 1e-3,
-    "batch_size": 32,
-    "num_epochs": 10,
-    ...
-}
-```
-For every new experiment, you will need to create a new directory under `experiments` with a similar `params.json` file.
+The other files come from upstream and are not used here. They include the attention model, the hyperparameter-search tools, `data_processing/ssgsea/` and notebooks.
 
-3. __Train__ your experiment. Simply run
-```
-python train.py --data_dir data/64x64_SIGNS --model_dir experiments/base_model
-```
-It will instantiate a model and train it on the training set following the hyperparameters specified in `params.json`. It will also evaluate some metrics on the validation set.
+## Credit and licence
 
-4. __Your first hyperparameters search__ We created a new directory `learning_rate` in `experiments` for you. Now, run
-```
-python search_hyperparams.py --data_dir data/64x64_SIGNS --parent_dir experiments/learning_rate
-```
-It will train and evaluate a model with different values of learning rate defined in `search_hyperparams.py` and create a new directory for each experiment under `experiments/learning_rate/`.
+deepImmune was written by Avinash Das Sahu, Keith Flaherty and X. Shirley Liu ([vinash85/deepImmune](https://github.com/vinash85/deepImmune)). Its PyTorch code started from the [CS230 project starter code](https://cs230-stanford.github.io/project-starter-code.html).
 
-5. __Display the results__ of the hyperparameters search in a nice format
-```
-python synthesize_results.py --parent_dir experiments/learning_rate
-```
-
-6. __Evaluation on the test set__ Once you've run many experiments and selected your best model and hyperparameters based on the performance on the validation set, you can finally evaluate the performance of your model on the test set. Run
-```
-python evaluate.py --data_dir data/64x64_SIGNS --model_dir experiments/base_model
-```
-
-
-## Guidelines for more advanced use
-
-We recommend reading through `train.py` to get a high-level overview of the training loop steps:
-- loading the hyperparameters for the experiment (the `params.json`)
-- loading the training and validation data
-- creating the model, loss_fn and metrics
-- training the model for a given number of epochs by calling `train_and_evaluate(...)`
-
-You can then have a look at `data_loader.py` to understand:
-- how jpg images are loaded and transformed to torch Tensors
-- how the `data_iterator` creates a batch of data and labels and pads sentences
-
-Once you get the high-level idea, depending on your dataset, you might want to modify
-- `model/net.py` to change the neural network, loss function and metrics
-- `model/data_loader.py` to suit the data loader to your specific needs
-- `train.py` for changing the optimizer
-- `train.py` and `evaluate.py` for some changes in the model or input require changes here
-
-Once you get something working for your dataset, feel free to edit any part of the code to suit your own needs.
-
-## Resources
-
-- [PyTorch documentation](http://pytorch.org/docs/0.3.0/)
-- [Tutorials](http://pytorch.org/tutorials/)
-- [Tutorials of package](https://cs230-stanford.github.io/project-starter-code.html)
-- [PyTorch warm-up](https://github.com/jcjohnson/pytorch-examples)
-
-[SIGNS]: https://drive.google.com/file/d/1ufiR6hUKhXoAyiBNsySPkUwlvE_wfEHC/view?usp=sharing
+This repository keeps the original GNU GPL-3.0 licence (see [LICENSE](LICENSE)).
