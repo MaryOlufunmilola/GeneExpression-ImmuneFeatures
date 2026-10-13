@@ -6,13 +6,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from lifelines.utils import concordance_index
 import math
+import re
 from sklearn import metrics as smetrics
 import r2python
 import logging
-from scipy.stats.stats import spearmanr
-from past.builtins import basestring
+from scipy.stats import spearmanr
+try:
+    from past.builtins import basestring
+except ImportError:  # Python 3 without the `future` package
+    basestring = str
 import copy
-import ipdb
 from torch.autograd.function import Function
 from torch.autograd import Variable
 # 3x3 convolution
@@ -91,25 +94,6 @@ class FullConnectedBlock(nn.Module):
         return out
 
 
-class FullConnectedBlock_v0(nn.Module):
-
-    def __init__(self, in_channels, out_channels, dropout_rate):
-        super(FullConnectedBlock, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.fc = nn.Linear(in_channels, out_channels)
-        self.bn1 = nn.BatchNorm1d(out_channels)
-        self.dropout_rate = dropout_rate
-        self.relu = nn.ReLU(inplace=True)
-
-    def forward(self, x):
-        residual = x
-        out = self.fc(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = F.dropout(out, p=self.dropout_rate, training=self.training)
-        return out
-
 
 # EmbeddingNet
 class BasicLayers(nn.Module):
@@ -146,17 +130,6 @@ class BasicLayers(nn.Module):
     def make_layers_FC(self, block, FC_size_list, dropout_rate):
         layers = []
         num_layers = len(FC_size_list)
-        for i in range(0, num_layers):
-            layers.append(block(self.fc_output_size, FC_size_list[
-                          i], dropout_rate,
-                norm_layer=self.params.norm_layer))
-            self.fc_output_size = FC_size_list[i]
-            print(self.fc_output_size)
-        return nn.Sequential(*layers)
-
-    def make_layers_LSTM(self, block, LSTM_size_list, dropout_rate):
-        layers = []
-        num_layers = len(LSTM_size_list)
         for i in range(0, num_layers):
             layers.append(block(self.fc_output_size, FC_size_list[
                           i], dropout_rate,
@@ -453,220 +426,6 @@ class outputLayer_simple(nn.Module):
         return out
 
 
-class outputLayer_old(nn.Module):
-
-    def __init__(self, embedding_size, linear_output_size=32, binary_output_size=32):
-        super(outputLayer, self).__init__()
-        self.linear_output_size = linear_output_size
-        self.binary_output_size = binary_output_size
-        if linear_output_size > 0:
-            self.linear1 = nn.Linear(embedding_size, linear_output_size)
-            self.dense1_bn = nn.BatchNorm1d(1)
-        if binary_output_size > 0:
-            self.linear2 = nn.Linear(embedding_size, binary_output_size)
-        self.sigmoid = nn.Sigmoid()
-        # self.softmax = nn.LogSoftmax()
-
-    def forward(self, x):
-        if(self.linear_output_size > 0):
-            linear1_out = self.linear1(x)
-            # print(linear1_out.shape)
-            # add a batch normalization for survival prediction
-            survival_out = self.dense1_bn(linear1_out[:, 0:1])
-
-        if(self.binary_output_size > 0):
-            linear2_out = self.linear2(x)
-            # binary_output = self.sigmoid(linear2_out)
-            binary_output = linear2_out  # sigmoid not required with BCEWithLogitsLoss
-            binary_output = self.sigmoid(binary_output)
-
-        if(self.linear_output_size == 0):
-            out = binary_output
-        elif(self.binary_output_size == 0):
-            out = torch.cat((survival_out, linear1_out[:, 1:]), 1)
-        else:
-            out = torch.cat((survival_out, linear1_out[:, 1:], binary_output), 1)
-        # print(out.shape)
-        return out
-
-
-class outputLayer_old(nn.Module):
-
-    def __init__(self, embedding_size, linear_output_size=32, binary_output_size=32):
-        super(outputLayer, self).__init__()
-        self.linear_output_size = linear_output_size
-        self.binary_output_size = binary_output_size
-        self.linear1 = nn.Linear(embedding_size, 1)
-        self.linear2 = nn.Linear(1, self.linear_output_size + self.binary_output_size)
-
-        self.dense1_bn = nn.BatchNorm1d(1)
-
-        self.sigmoid = nn.Sigmoid()
-        # self.softmax = nn.LogSoftmax()
-
-    def forward(self, x):
-        linear1_out = self.linear1(x)
-        linear2_out = self.linear2(linear1_out)
-        survival_out = self.dense1_bn(linear2_out[:, 0:1])
-        binary_output = self.sigmoid(linear2_out[:, self.linear_output_size:])
-        out = torch.cat((survival_out, linear2_out[:, 1:self.linear_output_size], binary_output), 1)
-
-        return out
-
-
-class outputLayer_incomplete(nn.Module):
-
-    def __init__(self, params):
-        super(outputLayer, self).__init__()
-        self.params = params
-        self.survival_size = int(len(params.survival_indices) / 2)
-        self.joint_size = len(params.joint_indices)
-        self.linear_output_size = len(params.continuous_phenotype_indices) + self.survival_size
-        self.binary_output_size = len(params.binary_phenotype_indices)
-        self.total_output_size = self.linear_output_size + self.total_output_size
-        self.joint_order_inx = get_joint_order()
-        self.survival_order_inx = get_survival_order()
-        if self.joint_size > 0:
-            self.truncated_output_size = self.total_output_size - self.joint_size + 1
-        else:
-            self.truncated_output_size = self.total_output_size
-
-        # if total_output_size > 0:
-        self.linear1 = nn.Linear(params.embedding_size, total_output_size)
-        self.dense1_bn = nn.BatchNorm1d(1)
-        # if binary_output_size > 0:
-        # self.linear2 = nn.Linear(params.embedding_size, binary_output_size)
-
-        if joint_size > 0:
-            self.linear_fork = nn.Linear(1, self.joint_size)
-        self.sigmoid = nn.Sigmoid()
-        # self.softmax = nn.LogSoftmax()
-
-    def get_joint_order():
-        order_inx = np.array(range(total_output_size))
-        if self.joint_size > 0:
-            start_inx = 1
-            for ii in range(total_output_size):
-                if any(self.params.joint_indices == ii):
-                    order_inx[ii] = 0
-                else:
-                    order_inx[ii] = start_inx
-                    start_inx = start_inx + 1
-        return order_inx
-
-    def get_survival_order():
-        order_inx = np.array(range(total_output_size))
-        if self.joint_size > 0:
-            start_inx = 1
-            for ii in range(total_output_size):
-                if any(self.params.joint_indices == ii):
-                    order_inx[ii] = 0
-                else:
-                    order_inx[ii] = start_inx
-                    start_inx = start_inx + 1
-        return order_inx
-
-    def forward(self, x):
-        # the first output is joint if present
-        out1 = self.linear1(x)
-        if self.joint_size > 0:
-            joint_output = out1[:, 0]
-            joint_output = linear_fork(joint_output)
-            out2 = torch.cat([joint_output, out1], 1)
-            out2 = out2[:, self.joint_order_inx]
-        else:
-            out2 = out1
-
-        if self.survival_size > 0:
-            survival_out = self.dense1_bn(out2[:, 0:self.survival_size])
-            out2 = torch.cat(survival_out, out2[:, self.survival_size:])
-
-        if self.binary_size > 0:
-            binary_out = self.sigmoid(out2[:, self.total_output_size - self.binary_size:])
-            out2 = torch.cat(out2[:, :self.total_output_size - self.binary_size], binary_out)
-
-        out = out2[:, self.order_inx]
-
-        return out
-
-
-class outputLayer_incomplete(nn.Module):
-
-    def __init__(self, params):
-        super(outputLayer, self).__init__()
-        self.params = params
-        self.survival_size = int(len(params.survival_indices) / 2)
-        self.joint_size = len(params.joint_indices)
-        self.linear_output_size = len(params.continuous_phenotype_indices) + self.survival_size
-        self.binary_output_size = len(params.binary_phenotype_indices)
-        self.total_output_size = self.linear_output_size + self.total_output_size
-        self.joint_order_inx = get_joint_order()
-        self.survival_order_inx = get_survival_order()
-        if self.joint_size > 0:
-            self.truncated_output_size = self.total_output_size - self.joint_size + 1
-        else:
-            self.truncated_output_size = self.total_output_size
-
-        # if total_output_size > 0:
-        self.linear1 = nn.Linear(params.embedding_size, total_output_size)
-        self.dense1_bn = nn.BatchNorm1d(1)
-        # if binary_output_size > 0:
-        # self.linear2 = nn.Linear(params.embedding_size, binary_output_size)
-
-        if joint_size > 0:
-            self.linear_fork = nn.Linear(1, self.joint_size)
-        self.sigmoid = nn.Sigmoid()
-        # self.softmax = nn.LogSoftmax()
-
-    def get_joint_order():
-        order_inx = np.array(range(total_output_size))
-        if self.joint_size > 0:
-            start_inx = 1
-            for ii in range(total_output_size):
-                if any(self.params.joint_indices == ii):
-                    order_inx[ii] = 0
-                else:
-                    order_inx[ii] = start_inx
-                    start_inx = start_inx + 1
-        return order_inx
-
-    def get_survival_order():
-        order_inx = np.array(range(total_output_size))
-        if self.joint_size > 0:
-            start_inx = 1
-            for ii in range(total_output_size):
-                if any(self.params.joint_indices == ii):
-                    order_inx[ii] = 0
-                else:
-                    order_inx[ii] = start_inx
-                    start_inx = start_inx + 1
-        return order_inx
-
-    def forward(self, x):
-        # the first output is joint if present
-        out1 = self.linear1(x)
-        if self.joint_size > 0:
-            joint_output = out1[:, 0]
-            joint_output = linear_fork(joint_output)
-            out2 = torch.cat([joint_output, out1], 1)
-            out2 = out2[:, self.joint_order_inx]
-        else:
-            out2 = out1
-
-        if self.survival_size > 0:
-            survival_out = self.dense1_bn(out2[:, 0:self.survival_size])
-            out2 = torch.cat(survival_out, out2[:, self.survival_size:])
-
-        if self.binary_size > 0:
-            binary_out = self.sigmoid(out2[:, self.total_output_size - self.binary_size:])
-            out2 = torch.cat(out2[:, :self.total_output_size - self.binary_size], binary_out)
-
-        out = out2[:, self.order_inx]
-
-        return out
-
-
-# tempNet
 class tempNet(nn.Module):
 
     def __init__(self, block, input_size, out_channels_list=[32, 32, 32],
@@ -1087,8 +846,6 @@ def max_na(xx):
 
 
 def mean_na(xx):
-    import ipdb
-    # ipdb.set_trace()
     xx = np.array(xx)
     return np.mean(xx[~np.isnan(xx)])
 
@@ -1152,10 +909,29 @@ class MSELossClip(nn.Module):
         return error
 
 
+def make_continuous_loss(spec):
+    """Build the continuous-trait loss from a config string without eval().
+
+    Accepts "nn.MSELoss()", "MSELoss", "nn.L1Loss()", "nn.SmoothL1Loss()",
+    or "MSELossClip(<number>)" / "MSELossClip(clip=<number>)".
+    """
+    if not isinstance(spec, str):
+        return spec
+    text = spec.replace(" ", "")
+    simple = {"nn.MSELoss()": nn.MSELoss, "MSELoss": nn.MSELoss, "nn.MSELoss": nn.MSELoss,
+              "nn.L1Loss()": nn.L1Loss, "nn.SmoothL1Loss()": nn.SmoothL1Loss}
+    if text in simple:
+        return simple[text]()
+    m = re.fullmatch(r"(?:net\.)?MSELossClip\((?:clip=)?([-+0-9.eE]+)\)", text)
+    if m:
+        return MSELossClip(float(m.group(1)))
+    raise ValueError("Unsupported continuous_loss in params: {!r}".format(spec))
+
+
 def create_lossfns_mask(params):
     continuous_loss = nn.MSELoss()
     if hasattr(params, 'continuous_loss'):
-        continuous_loss = eval(params.continuous_loss)
+        continuous_loss = make_continuous_loss(params.continuous_loss)
 
     survival_output_size = int(len(params.survival_indices) / 2)
     linear_output_size = survival_output_size + len(params.continuous_phenotype_indices)
@@ -1170,20 +946,41 @@ def create_lossfns_mask(params):
     return params
 
 
+def is_cox_loss(loss_fn):
+    """True if loss_fn is the Cox partial-likelihood loss."""
+    return getattr(loss_fn, '__name__', None) == 'negative_log_partial_likelihood_loss'
+
+
 def regularized_loss(model, params, index="all"):
+    """L1/L2 penalty on the weights of nn.Linear layers.
+
+    index == "all": penalize every Linear weight matrix in `model`.
+    index == i:     penalize only row i of the final Linear layer, i.e. the
+                    weights feeding output i (one task head).
+
+    Previously the parameter filter required names ending in both "weight"
+    and "linear", which no parameter satisfies, so no penalty was ever added.
+    """
+    l1 = getattr(params, 'l1_regularizer', 0.) or 0.
+    l2 = getattr(params, 'l2_regularizer', 0.) or 0.
+    if l1 == 0 and l2 == 0:
+        return 0.
+
+    linear_layers = [m for m in model.modules() if isinstance(m, nn.Linear)]
+    if len(linear_layers) == 0:
+        return 0.
+
+    if index == "all":
+        weights = [m.weight.view(-1) for m in linear_layers]
+    else:
+        final = linear_layers[-1]
+        if index >= final.weight.shape[0]:
+            return 0.
+        weights = [final.weight[index].view(-1)]
 
     loss_curr = 0.
-
-    for name, parameters in model.named_parameters():
-        if name.endswith('weight') and name.endswith('linear'):
-            if index is "all":
-                loss_curr = loss_curr + \
-                    torch.norm(parameters.view(-1), 1) * params.l1_regularizer \
-                    + torch.norm(parameters.view(-1), 2) * params.l2_regularizer
-            else:
-                loss_curr = loss_curr + \
-                    torch.norm(parameters[index].view(-1), 1) * params.l1_regularizer \
-                    + torch.norm(parameters[index].view(-1), 2) * params.l2_regularizer
+    for w in weights:
+        loss_curr = loss_curr + torch.norm(w, 1) * l1 + torch.norm(w, 2) * l2
     return loss_curr
 
 
@@ -1214,15 +1011,14 @@ def calculate_loss(labels, net_outputs, loss_fns):
     for i in range(len_fns):
         net_output, loss_fn = net_outputs[:, i], loss_fns[i]
         # print(loss_fn)
-        # print(loss_fn.__name__ is 'negative_log_partial_likelihood_loss')
-        if hasattr(loss_fn, '__name__'):
-            if loss_fn.__name__ is 'negative_log_partial_likelihood_loss':
-                label = labels[:, label_inx:(label_inx + 2)]
-                label_inx = label_inx + 2
-                # print(label.shape)
-                na_inx = ~(isnan(label[:, 0]) | isnan(label[:, 1]))
-                label, net_output = label[na_inx, :], net_output[na_inx]
-                # print(label)
+        # print(is_cox_loss(loss_fn))
+        if is_cox_loss(loss_fn):
+            label = labels[:, label_inx:(label_inx + 2)]
+            label_inx = label_inx + 2
+            # print(label.shape)
+            na_inx = ~(isnan(label[:, 0]) | isnan(label[:, 1]))
+            label, net_output = label[na_inx, :], net_output[na_inx]
+            # print(label)
         else:
             label = labels[:, label_inx]
             label_inx = label_inx + 1
@@ -1266,9 +1062,8 @@ def define_metrics(params):
             # i is output_batch
             loss_fn = params.loss_fns[i]
             metrics.append([params.header[label_inx] + "_" + str(i), metrics_type[i], i, label_inx])
-            if hasattr(loss_fn, '__name__'):
-                if loss_fn.__name__ is 'negative_log_partial_likelihood_loss':
-                    label_inx = label_inx + 2
+            if is_cox_loss(loss_fn):
+                label_inx = label_inx + 2
             else:
                 label_inx = label_inx + 1
         params.metrics = [metrics[tt] for tt in params.metrics]
@@ -1299,7 +1094,7 @@ def initializeMTL(params):
         params.mtl = False
     else:
         is_regression = [torch.tensor(True)]
-        is_regression += [torch.tensor(True) if isinstance(xx, nn.MSELoss) else torch.tensor(False) for xx in params.loss_fns]
+        is_regression += [torch.tensor(True) if isinstance(xx, (nn.MSELoss, MSELossClip)) else torch.tensor(False) for xx in params.loss_fns]
         is_regression = torch.stack(is_regression)  # True: Regression/MeanSquaredErrorLoss, False: Classification/CrossEntropyLoss/Cox-hazard model
         params.mtlloss = MultiTaskLoss(is_regression=is_regression, reduction='sum')
 
@@ -1380,13 +1175,12 @@ def update_loss_parameters(labels, net_outputs, embedding_model, outputs, embedd
     # ipdb.set_trace()
     for i in range(len(loss_fns)):
         net_output, loss_fn = net_outputs[:, i], loss_fns[i]
-        if hasattr(loss_fn, '__name__'):
-            if loss_fn.__name__ is 'negative_log_partial_likelihood_loss':
-                label = labels[:, label_inx:(label_inx + 2)]
-                label_inx = label_inx + 2
-                # print(label.shape)
-                na_inx = ~(isnan(label[:, 0]) | isnan(label[:, 1]))
-                label, net_output = label[na_inx, :], net_output[na_inx]
+        if is_cox_loss(loss_fn):
+            label = labels[:, label_inx:(label_inx + 2)]
+            label_inx = label_inx + 2
+            # print(label.shape)
+            na_inx = ~(isnan(label[:, 0]) | isnan(label[:, 1]))
+            label, net_output = label[na_inx, :], net_output[na_inx]
         else:
             label = labels[:, label_inx]
             label_inx = label_inx + 1
@@ -1468,13 +1262,12 @@ def update_loss_parameters_vectorized(labels, net_outputs, models, optimizers, p
     # ipdb.set_trace()
     for i in range(len(loss_fns)):
         net_output, loss_fn = net_outputs[:, i], loss_fns[i]
-        if hasattr(loss_fn, '__name__'):
-            if loss_fn.__name__ is 'negative_log_partial_likelihood_loss':
-                label = labels[:, label_inx:(label_inx + 2)]
-                label_inx = label_inx + 2
-                # print(label.shape)
-                na_inx = ~(isnan(label[:, 0]) | isnan(label[:, 1]))
-                label, net_output = label[na_inx, :], net_output[na_inx]
+        if is_cox_loss(loss_fn):
+            label = labels[:, label_inx:(label_inx + 2)]
+            label_inx = label_inx + 2
+            # print(label.shape)
+            na_inx = ~(isnan(label[:, 0]) | isnan(label[:, 1]))
+            label, net_output = label[na_inx, :], net_output[na_inx]
         else:
             label = labels[:, label_inx]
             label_inx = label_inx + 1

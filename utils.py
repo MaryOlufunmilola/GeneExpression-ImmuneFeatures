@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 import os
 import shutil
@@ -6,12 +7,85 @@ import torch
 import jstyleson
 import numpy as np
 import math
-from past.builtins import basestring
-import umap
-from sklearn.datasets import fetch_openml
+try:
+    from past.builtins import basestring
+except ImportError:
+    basestring = str
+import ast
+import random
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+
+
+_SAFE_NAMES = {"range": range, "list": list, "len": len, "True": True, "False": False, "None": None}
+
+
+def safe_eval(expr):
+    """Evaluate a config value: Python literals, plus range()/list()/len().
+
+    Replaces bare eval()/exec() on parameter strings. Anything else raises.
+    """
+    expr = expr.strip()
+    try:
+        return ast.literal_eval(expr)
+    except (ValueError, SyntaxError):
+        pass
+    tree = ast.parse(expr, mode="eval")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id not in _SAFE_NAMES:
+            raise ValueError("Unsupported name {!r} in config value {!r}".format(node.id, expr))
+        if isinstance(node, (ast.Attribute, ast.Lambda, ast.Subscript)):
+            raise ValueError("Unsupported expression in config value {!r}".format(expr))
+    return eval(compile(tree, "<config>", "eval"), {"__builtins__": {}}, dict(_SAFE_NAMES))
+
+
+def apply_hyper_params(params, hyper_param):
+    """Apply a --hyper_param string such as
+    "params.batch_size=32;params.binary_phenotype_indices=[1,2]".
+    Replaces exec(args.hyper_param)."""
+    if not hyper_param:
+        return params
+    for stmt in hyper_param.split(";"):
+        stmt = stmt.strip()
+        if not stmt:
+            continue
+        m = re.fullmatch(r"params\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)", stmt, flags=re.S)
+        if m is None:
+            raise ValueError("--hyper_param entries must look like params.name=value; got {!r}".format(stmt))
+        setattr(params, m.group(1), safe_eval(m.group(2)))
+    return params
+
+
+def set_seed(seed=230):
+    """Seed every random number generator used in training (data shuffling
+    uses NumPy; previously only torch was seeded)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def resolve_embedding_model(name, net_module):
+    """Map params.emebedding_model (e.g. "net.EmbeddingNet") to the class."""
+    cls_name = name.split(".")[-1]
+    cls = getattr(net_module, cls_name, None)
+    if cls is None or not isinstance(cls, type) or not issubclass(cls, torch.nn.Module):
+        raise ValueError("Unknown embedding model {!r}".format(name))
+    return cls
+
+
+def resolve_aggregate(name, net_module):
+    """Map params.aggregate (e.g. "min", "np.mean", "mean_na") to a function."""
+    table = {"min": min, "max": max, "np.mean": np.mean, "np.nanmean": np.nanmean,
+             "np.median": np.median, "np.nanmedian": np.nanmedian,
+             "np.min": np.min, "np.max": np.max, "np.nanmin": np.nanmin, "np.nanmax": np.nanmax,
+             "mean_na": net_module.mean_na, "net.mean_na": net_module.mean_na,
+             "max_na": net_module.max_na, "net.max_na": net_module.max_na}
+    if name not in table:
+        raise ValueError("Unknown aggregate {!r}; use one of {}".format(name, sorted(table)))
+    return table[name]
 
 
 class Params():
@@ -44,8 +118,8 @@ class Params():
     def eval_string(self, params):
         for key, value in params.items():
             if isinstance(value, basestring):
-                if value[0] == "e":
-                    params[key] = eval(value[1:])
+                if value[:1] == "e":
+                    params[key] = safe_eval(value[1:])
         return params
 
     @property
@@ -214,6 +288,7 @@ def create_save_umap(mat, color, epoch, savedir=None, title=None):
     Create umap and save figure
     '''
 
+    import umap  # optional dependency, only needed for plots
     embedding = umap.UMAP(n_neighbors=15,
                           min_dist=0.1,
                           metric='correlation').fit_transform(mat)

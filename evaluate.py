@@ -14,6 +14,8 @@ import model.data_generator as data_generator
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--seed', type=int, default=230,
+                    help='Random seed for NumPy, Python and PyTorch')
 parser.add_argument('--data_dir', default='data/64x64_SIGNS', help="Directory containing the dataset")
 parser.add_argument('--model_dir', default='experiments/base_model', help="Directory containing params.json")
 parser.add_argument('--restore_file', default='best', help="name of the file in --model_dir \
@@ -169,12 +171,10 @@ if __name__ == '__main__':
 
     # use GPU if available
     params.cuda = torch.cuda.is_available()     # use GPU is available
-    exec(args.hyper_param)
+    params = utils.apply_hyper_params(params, args.hyper_param)
 
     # Set the random seed for reproducible experiments
-    torch.manual_seed(230)
-    if params.cuda:
-        torch.cuda.manual_seed(230)
+    utils.set_seed(args.seed)
 
     # Get the logger
     utils.set_logger(os.path.join(args.model_dir, 'evaluate.log'))
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     params.VAE = True if params.emebedding_model == "net.VariationalEmbeddingNet" else False
 
     # Define the model
-    embedding_model = eval(params.emebedding_model + "(params)")
+    embedding_model = utils.resolve_embedding_model(params.emebedding_model, net)(params)
     # embedding_model = net.VariationalEmbeddingNet(params) if params.VAE else net.EmbeddingNet(params)
     outputs = net.outputLayer(params)
 
@@ -233,6 +233,6 @@ if __name__ == '__main__':
     data_dirs = pd.read_csv(args.data_dir, sep="\t")
     data_dirs = [row['data_dir'] if args.output_dir == "" else args.output_dir for index, row in data_dirs.iterrows()]
     val_metrics_all = [evaluate(embedding_model, outputs, dataset[0][type_file], metrics, params, validation_file=data_dir + "/" + type_file + "_" + str(inx) + "_prediction.csv") for inx, data_dir, dataset in zip(range(len(data_dirs)), data_dirs, datasets)]
-    val_metrics = {metric: eval(params.aggregate)([x[metric] for x in val_metrics_all]) for metric in val_metrics_all[0]}
+    val_metrics = {metric: utils.resolve_aggregate(params.aggregate, net)([x[metric] for x in val_metrics_all]) for metric in val_metrics_all[0]}
     save_path = os.path.join("{}.json".format(restore_path))
     utils.save_dict_to_json(val_metrics, save_path)

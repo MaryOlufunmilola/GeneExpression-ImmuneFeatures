@@ -29,6 +29,8 @@ from tensorboardX import SummaryWriter
 from shutil import copy
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--seed', type=int, default=230,
+                    help='Random seed for NumPy, Python and PyTorch')
 parser.add_argument('--data_dir', default='data/64x64_SIGNS',
                     help="File containing directory containing datasets")
 # parser.add_argument('--data_dir_list', default=None,
@@ -239,7 +241,7 @@ def train_and_evaluate(embedding_model, outputs, datasets, embedding_optimizer, 
                 except:
                     pass
 
-        val_metrics = {metric: eval(params.aggregate)([x[metric] for x in val_metrics_all]) for metric in val_metrics_all[0]}
+        val_metrics = {metric: utils.resolve_aggregate(params.aggregate, net)([x[metric] for x in val_metrics_all]) for metric in val_metrics_all[0]}
 
         # val_metrics = eval(params.aggregate)(val_metrics)
         val_acc = val_metrics[params.best_model_metric]
@@ -290,7 +292,7 @@ if __name__ == '__main__':
         json_path), "No json configuration file found at {}".format(json_path)
     params = utils.Params(json_path)
     params.cuda = torch.cuda.is_available()
-    exec(args.hyper_param)
+    params = utils.apply_hyper_params(params, args.hyper_param)
     params = net.create_lossfns_mask(params)
     params = net.initializeMTL(params)
     params.process_negative_loss_excluded = net.process_negative_loss_excluded(params)
@@ -302,9 +304,7 @@ if __name__ == '__main__':
     # print(params.cuda)
 
     # Set the random seed for reproducible experiments
-    torch.manual_seed(230)
-    if params.cuda:
-        torch.cuda.manual_seed(230)
+    utils.set_seed(args.seed)
 
     # Set the logger
     utils.set_logger(os.path.join(args.model_dir, 'train.log'))
@@ -337,7 +337,7 @@ if __name__ == '__main__':
     #     net.ConvolutionBlock, input_size, out_channels_list=params.out_channels_list, FC_size_list=params.FC_size_list, embedding_size=params.embedding_size, kernel_sizes=params.kernel_sizes, strides=params.strides, dropout_rate=params.dropout_rate)
     params.VAE = True if params.emebedding_model == "net.VariationalEmbeddingNet" else False
 
-    embedding_model = eval(params.emebedding_model + "(params)")
+    embedding_model = utils.resolve_embedding_model(params.emebedding_model, net)(params)
     # embedding_model = net.VariationalEmbeddingNet(params) if params.VAE else net.EmbeddingNet(params)
     outputs = net.outputLayer(params)
 

@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 from imblearn.over_sampling import SMOTE
 from imblearn.combine import SMOTETomek
 from imblearn.over_sampling import SMOTENC
-import ipdb
+import ast
 # from keras import backend as K
 
 
@@ -83,7 +83,7 @@ def qnorm_array(xx):
             xx = norm.ppf(xx, loc=0, scale=1)
             xx_back[~np.isnan(xx_back)] = xx
         else:
-            xx[:] = 0
+            xx_back[~np.isnan(xx_back)] = 0
 
     return xx_back
 
@@ -122,6 +122,15 @@ def normalize(data):
     return data
 
 
+def _norm_method(method):
+    methods = {"qnorm_array": qnorm_array, "znorm": znorm}
+    if callable(method):
+        return method
+    if method not in methods:
+        raise ValueError("Unknown normalization method: {!r}".format(method))
+    return methods[method]
+
+
 def quantile_normalize(data, method="qnorm_array"):
     """
     Perform quantile normalization on a np.array similar to qnorm_col
@@ -131,7 +140,7 @@ def quantile_normalize(data, method="qnorm_array"):
     # tracer()
     data = data.astype('float')
     if data.size > 0:  # at-least one column
-        method = eval(method)
+        method = _norm_method(method)
         data = np.apply_along_axis(method, 0, data)
     return data
 
@@ -143,7 +152,7 @@ def quantile_normalize_nonbinary(data, method="qnorm_array"):
 
     # force data into floats for np calculations
     data = data.astype('float')
-    method = eval(method)
+    method = _norm_method(method)
     for index in range(data.shape[1]):
         col = data[:, index]
         if not is_binary(np.nan_to_num(col)):
@@ -161,7 +170,7 @@ def readFile(input_file, header=False):
     return out
 
 
-def processDataLabels(input_file, normalize=True, batch_by_type=False):
+def processDataLabels(input_file, do_normalize=True, batch_by_type=False):
     # Read in file
     data = pd.read_csv(input_file, sep="\t")
 
@@ -176,7 +185,7 @@ def processDataLabels(input_file, normalize=True, batch_by_type=False):
     labels = data.iloc[:, -2:]
 
     # quantile normalization
-    if normalize:
+    if do_normalize:
         features = normalize(features)
 
     # process into a numpy array
@@ -222,6 +231,25 @@ def DataAugmentation(data, labels, balance=False):
     return data, labels
 
 
+def check_binary_labels(lab_binary, params=None):
+    """Binary targets feed nn.BCELoss and must be 0, 1 or NaN.
+
+    A 1/2 coding (common from R factor levels) makes BCELoss unbounded below,
+    so training pushes the sigmoid output to 1 for every sample.
+    """
+    lab_binary = np.asarray(lab_binary, dtype=float)
+    if lab_binary.size == 0:
+        return
+    values = np.unique(lab_binary[~np.isnan(lab_binary)])
+    bad = values[(values != 0) & (values != 1)]
+    if len(bad) > 0:
+        names = getattr(params, 'header', None)
+        raise ValueError(
+            "Binary phenotype labels must be 0/1/NaN; found values {}. "
+            "Recode labels (e.g. 1/2 -> 1/0) before training. Header: {}".format(
+                list(bad[:10]), names))
+
+
 def generator_survival(features, labels, params, cancertype=None,
                        shuffle=True, batch_size=64, batch_by_type=False,
                        normalize_input=False, dataset_type='non_icb', sort_survival=False,
@@ -244,6 +272,7 @@ def generator_survival(features, labels, params, cancertype=None,
             np_take(lab, params.survival_indices, axis=1), \
             np_take(lab, params.continuous_phenotype_indices, axis=1),\
             np_take(lab, params.binary_phenotype_indices, axis=1)
+        check_binary_labels(lab_binary, params)
         lab_continuous = quantile_normalize(lab_continuous)
         # lab_continuous = quantile_normalize(lab_continuous, method="znorm")
         lab = np.concatenate([lab_survival, lab_continuous, lab_binary], 1).astype(float)
@@ -295,8 +324,8 @@ def generator_survival(features, labels, params, cancertype=None,
             for type_curr in types:
                 # print(type_curr)
                 features[cancertype == type_curr] = quantile_normalize_nonbinary(features[cancertype == type_curr])
-                for ii in range(len(survival_time_index)):
-                    labels[cancertype == type_curr, ii] = quantile_normalize(labels[cancertype == type_curr, ii])
+                for time_col in survival_time_index:
+                    labels[cancertype == type_curr, time_col] = qnorm_array(labels[cancertype == type_curr, time_col].astype(float))
 
         if batch_by_type:
             batches = [Xy for type_curr in types for Xy in create_batches(features[cancertype == type_curr], labels[cancertype == type_curr], tsne_labels_mat[cancertype == type_curr], batch_size, shuffle)]
@@ -339,7 +368,7 @@ def generator_survival(features, labels, params, cancertype=None,
                 # X, y = batch[0]
                 # tracer()
                 if sort_survival:
-                    sort_index = (input_size - 3) if dataset_type is 'icb' else 0
+                    sort_index = (input_size - 3) if dataset_type == 'icb' else 0
                     # this was assuming in icb dataset survival is done through
                     idx = np.argsort(abs(y[:, sort_index]))[::-1]
                     X = X[idx, :]
@@ -375,6 +404,7 @@ def generator_survival_new(features, labels, params, cancertype=None,
             np_take(lab, params.survival_indices, axis=1), \
             np_take(lab, params.continuous_phenotype_indices, axis=1),\
             np_take(lab, params.binary_phenotype_indices, axis=1)
+        check_binary_labels(lab_binary, params)
         lab_continuous = quantile_normalize(lab_continuous)
         # lab_continuous = quantile_normalize(lab_continuous, method="znorm")
 
@@ -424,8 +454,8 @@ def generator_survival_new(features, labels, params, cancertype=None,
             for type_curr in types:
                 # print(type_curr)
                 features[cancertype == type_curr] = quantile_normalize_nonbinary(features[cancertype == type_curr])
-                for ii in range(len(survival_time_index)):
-                    labels[cancertype == type_curr, ii] = quantile_normalize(labels[cancertype == type_curr, ii])
+                for time_col in survival_time_index:
+                    labels[cancertype == type_curr, time_col] = qnorm_array(labels[cancertype == type_curr, time_col].astype(float))
 
         if batch_by_type:
             batches = [Xy for type_curr in types for Xy in create_batches(features[cancertype == type_curr], labels[cancertype == type_curr], tsne_labels_mat[cancertype == type_curr], batch_size, shuffle)]
@@ -509,7 +539,7 @@ def generator_survival_new(features, labels, params, cancertype=None,
                 # X, y = batch[0]
                 # tracer()
                 if sort_survival:
-                    sort_index = (input_size - 3) if dataset_type is 'icb' else 0
+                    sort_index = (input_size - 3) if dataset_type == 'icb' else 0
                     # this was assuming in icb dataset survival is done through
                     idx = np.argsort(abs(y[:, sort_index]))[::-1]
                     X = X[idx, :]
@@ -592,11 +622,11 @@ def fetch_dataloader(data_dir_params, params, types, shuffle):
     data_augmentation_array = get_or_default(data_dir_params, 'data_augmentation', '[0, 0]')
     types = get_or_default(data_dir_params, 'types', types)
     try:
-        types = eval(types)
-    except:
+        types = ast.literal_eval(types)
+    except (ValueError, SyntaxError):
         pass
-    train_optimizer_mask = eval(train_optimizer_mask)
-    data_augmentation_array = eval(data_augmentation_array)
+    train_optimizer_mask = ast.literal_eval(train_optimizer_mask) if isinstance(train_optimizer_mask, str) else train_optimizer_mask
+    data_augmentation_array = ast.literal_eval(data_augmentation_array) if isinstance(data_augmentation_array, str) else data_augmentation_array
     data_augmentation = data_augmentation_array[0]
     dataloaders = {}
     name = prefix
@@ -609,7 +639,7 @@ def fetch_dataloader(data_dir_params, params, types, shuffle):
     for split in ['train', 'val', 'test', 'all']:
         print(prefix)
         path = os.path.join(data_dir, "{}".format(prefix))
-        if split is not "all":
+        if split != "all":
             dataset_file = path + "dataset_" + split + ".txt"
         else:
             dataset_file = path + "dataset.txt"
