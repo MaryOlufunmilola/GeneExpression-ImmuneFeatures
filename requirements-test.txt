@@ -7,4 +7,7 @@ tensorboardX
 imbalanced-learn
 jstyleson
 future
+tqdm
+matplotlib
+seaborn
 pytest

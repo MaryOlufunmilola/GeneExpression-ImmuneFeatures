@@ -13,8 +13,6 @@ except ImportError:
     basestring = str
 import ast
 import random
-import matplotlib.pyplot as plt
-import seaborn as sns
 import pandas as pd
 
 
@@ -293,6 +291,8 @@ def create_save_umap(mat, color, epoch, savedir=None, title=None):
                           min_dist=0.1,
                           metric='correlation').fit_transform(mat)
     # col = color.astype(int)
+    import matplotlib.pyplot as plt  # optional, plotting only
+    import seaborn as sns
     df = pd.DataFrame(dict(color=color))
     fig = plt.figure()
     # plt.scatter(embedding[:, 0], embedding[:, 1])
