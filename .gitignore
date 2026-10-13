@@ -136,3 +136,6 @@ outputs/
 results/
 tensorboardLog/
 *_prediction.csv
+
+# R session history
+.Rhistory

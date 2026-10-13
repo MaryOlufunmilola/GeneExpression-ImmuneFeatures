@@ -1,2 +1,0 @@
-prefix	dataset_type	train_optimizer_mask	data_dir
-""	"icb"	"[1,1,1]"	"../data/tcga/neoantigen.v2/attention/"

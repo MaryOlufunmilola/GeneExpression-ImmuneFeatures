@@ -100,18 +100,19 @@ Survival associations of predicted immune factors are computed with `scripts/sur
 
 ## Repository layout
 
-The files used by this project:
+Everything in the repository:
 
 | Path | Purpose |
 |---|---|
 | `train.py`, `evaluate.py`, `utils.py`, `r2python.py` | Training and evaluation |
 | `model/net.py`, `model/data_generator.py` | Model, losses, metrics, data loading |
-| `config_files/` | Example `params.json` and dataset lists |
+| `config_files/` | Example `params.json` and dataset lists (upstream examples; paths point to the lab's old data) |
 | `data_processing/preprocess_loco.R` | Leakage-free input files |
 | `scripts/check_splits.py`, `scripts/survival_analysis.py` | Split checks, survival analysis |
-| `tests/` | pytest suite |
+| `tests/`, `.github/workflows/` | pytest suite, run on every push |
+| `requirements-test.txt` | Python dependencies |
 
-The other files come from upstream and are not used here. They include the attention model, the hyperparameter-search tools, `data_processing/ssgsea/` and notebooks.
+Upstream files this project does not use were removed. They include the attention model, the hyperparameter-search tools, `data_processing/ssgsea/`, notebooks and trial tables. They remain in the git history and in [vinash85/deepImmune](https://github.com/vinash85/deepImmune).
 
 ## Credit and licence
 

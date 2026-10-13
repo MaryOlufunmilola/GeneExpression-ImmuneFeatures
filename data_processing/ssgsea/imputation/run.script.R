@@ -1,5 +1,0 @@
-library(avinash)
-library(data.table)
-load("~/project/deeplearning/icb/results/sessions/temp.RData")
-dataset_ssgsea_sel.norm = match.expression.distribution(dataset_ssgsea_sel.norm, tcga.exp.norm)
-save(file="~/project/deeplearning/icb/results/sessions/temp1.RData", dataset_ssgsea_sel.norm)
