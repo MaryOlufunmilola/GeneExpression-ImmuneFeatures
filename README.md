@@ -1,3 +1,27 @@
+# deepImmune — multi-task cross-cohort benchmark fork
+
+This fork of [vinash85/deepImmune](https://github.com/vinash85/deepImmune) (pytorch branch, Sahu, Flaherty and Liu) is used, with Avinash Sahu's permission, to test whether training on immune phenotypes and survival improves prediction of immunotherapy response in cohorts the model has not seen. It keeps the original GPL-3.0 licence.
+
+Changes from upstream are listed in [FIXES.md](FIXES.md): correctness fixes, seeded runs, a pytest suite, leakage-free leave-one-study-out preprocessing (`data_processing/preprocess_loco.R`), a split checker and a stratified survival script.
+
+### Quick start
+
+```bash
+conda create -n deepimmune python=3.11 -y && conda activate deepimmune
+pip install torch                       # Linux CPU-only: add --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements-test.txt
+pytest -q tests
+
+Rscript data_processing/preprocess_loco.R          # set cfg$data_dir / cfg$out_dir first
+python scripts/check_splits.py <out_dir>/folds
+```
+
+Data are not stored in this repository.
+
+---
+
+## Original README
+
 # AI-predictor of immunotherapy response. 
 
 *Authors: Avinash Das Sahu, Keith Flaherty and X. Shiley Liu 

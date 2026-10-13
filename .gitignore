@@ -105,7 +105,8 @@ venv.bak/
 .mypy_cache/
 
 # vim 
-.swp
+*.swp
+.*.swp
 
 # model file 
 
@@ -123,3 +124,15 @@ runs/
 .RData
 .RDataTmp1
 .Rprofile
+
+# macOS
+.DS_Store
+
+# local data and outputs (keep out of git)
+data/
+Data11*/
+loco/
+outputs/
+results/
+tensorboardLog/
+*_prediction.csv
