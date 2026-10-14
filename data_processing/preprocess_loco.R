@@ -110,8 +110,22 @@ normalize_within_cohort <- function(x) {
 code_response <- function(x) {
   x <- toupper(trimws(as.character(x)))
   out <- rep(NA_real_, length(x))
+  # Already-harmonized files code response as 1 (responder, CR/PR) / 0 (SD/PD)
+  out[x %in% c("1", "1.0", "TRUE")] <- 1
+  out[x %in% c("0", "0.0", "FALSE")] <- 0
   out[x %in% c("CR", "PR", "COMPLETE RESPONSE", "PARTIAL RESPONSE", "R", "RESPONDER")] <- 1
   out[x %in% c("SD", "PD", "STABLE DISEASE", "PROGRESSIVE DISEASE", "NR", "NON-RESPONDER", "NONRESPONDER")] <- 0
+  out
+}
+
+# Sex: keep an existing 0/1 coding as it is; map text labels to 1 = male, 0 = female.
+code_sex <- function(x) {
+  v <- toupper(trimws(as.character(x)))
+  v[v %in% c("", "NA", "NAN")] <- NA
+  if (all(v[!is.na(v)] %in% c("0", "1", "0.0", "1.0"))) return(as.numeric(v))
+  out <- rep(NA_real_, length(v))
+  out[v %in% c("MALE", "M")] <- 1
+  out[v %in% c("FEMALE", "F")] <- 0
   out
 }
 
@@ -188,9 +202,12 @@ for (ds in c(icb_sets, aux_sets)) {
   }
 
   # 0/1 binary traits by column name (only if present)
-  if ("SEX" %in% colnames(clin)) clin$SEX_MALE <- code_binary(clin$SEX, c("MALE", "M"))
-  if ("GENDER" %in% colnames(clin)) clin$SEX_MALE <- code_binary(clin$GENDER, c("MALE", "M"))
+  if ("SEX" %in% colnames(clin)) clin$SEX_MALE <- code_sex(clin$SEX)
+  if ("GENDER" %in% colnames(clin)) clin$SEX_MALE <- code_sex(clin$GENDER)
 
+  # Survival time units differ between studies (days, months, years). That is fine:
+  # deepImmune rank-normalizes survival time within cohort, and the survival script
+  # stratifies by cohort. Never pool raw times across cohorts.
   for (sc in cfg$survival_cols) {
     clin[[sc]] <- if (sc %in% colnames(clin)) suppressWarnings(as.numeric(clin[[sc]])) else NA_real_
   }
